@@ -7,7 +7,7 @@ import re #https://docs.python.org/3/library/re.html
 from datetime import datetime #https://docs.python.org/3/library/datetime.html
 from nltk.corpus import cmudict #https://www.nltk.org/ #http://www.speech.cs.cmu.edu/cgi-bin/cmudict
 
-import simpleaudio
+import simpleaudio #DON'T DELETE THESE, INSTRUCTOR ADDED MODULES
 from synth_args import process_commandline
 
 class Synth:
@@ -42,8 +42,7 @@ class Synth:
         """
         Synthesises a phone list into an audio utterance.
         :param phones: list of phones (list of strings)
-        :param reverse: takes input 'signal', 'phones', or 'words'
-        :param smooth_concat: makes the concatenation smoother
+        :param smooth_concat:
         :return: synthesised utterance (Audio instance)
         """
 
@@ -155,7 +154,7 @@ class Utterance:
         """
 
         if len(self.phrase.split()) != 1:
-            for date in re.findall(r'[0-9]+\/+[0-9]+\/[0-9]+', self.phrase):
+            for date in re.findall(r'\d+\/+\d+\/+\d+|\d+\/+\d+', self.phrase):
                 newdate = self.mutate_date(self.phrase)
                 self.phrase = self.phrase[:self.phrase.index(date)] + newdate + self.phrase[self.phrase.index(date) + len(date):]
 
@@ -240,20 +239,29 @@ class Utterance:
         dates = [int(x) for x in re.findall(r'[0-9]+', dates)]  # turning all strings to ints for our dictionary search
                                                                 # takes care of numbers with leading zeros, e.g. '01' -> 1
 
+
         if len(dates) == 2: #dates DD/MM
-            dates = dates['Month'][dates[1]] + " " + dates['Day'][dates[0]]
+            dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]]
 
         elif len(dates) == 3: #dates DD/MM/YY(YY)
-            dates.append(int((dates[-1] - 1900) / 10) * 10)
-            dates[-2] = dates[-2] - 1900 - dates[-1] #list positions: [0] = Day, [1] = Month, [2] = Year(SINGULAR), and [3] = Year(DECADE)
+            if dates[-1] >= 1900:
+                dates[-1] -= 1900
+            dates.append(int((dates[-1] / 10)) * 10)
+            dates[-2] = dates[-2] - dates[-1] #list positions: [0] = Day, [1] = Month, [2] = Year(SINGULAR), and [3] = Year(DECADE)
 
-            if dates[-1] > 10 and dates[-2] != 0: #most dates fall within this category
-                dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]] + " nineteen " + int2date['Year'][dates[3]] + " " + int2date['Year'][dates[2]]
+            try:
+                if dates[3] > 10 and dates[2] != 0: #most dates fall within this category
+                    dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]] + " nineteen " + int2date['Year'][dates[3]] + " " + int2date['Year'][dates[2]]
+                elif (dates[3] >= 10 or dates[2] == 0) and dates[2] == 0: #full decades
+                    dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]] + " nineteen " + int2date['Year'][dates[3]]
+                elif dates[3] == 10 and dates[2] != 0:
+                    dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]] + " nineteen " + int2date['Year'][dates[2] + dates[3]]
+                else: #years 1901-1909, adds a bit of style
+                    dates= int2date["Month"][dates[1]] + " " + int2date["Day"][dates[0]] + " nineteen o " + int2date["Year"][dates[2]]
 
-            elif (dates[-1] >= 10 or dates[-1] == 0) and dates[-2] == 0: #full decades
-                dates = int2date['Month'][dates[1]] + " " + int2date['Day'][dates[0]] + " nineteen " + int2date['Year'][dates[3]]
-            else: #years 1901-1909, adds a bit of style
-                dates= int2date["Month"][dates[1]] + " " + int2date["Day"][dates[0]] + " nineteen o " + int2date["Year"][dates[2]]
+            except KeyError:
+                print("Date out of range (supposed to be between 01/01/1900 - 31/12/1999. Terminating.")
+                exit()
 
         return str(dates)
 
