@@ -55,6 +55,6 @@ def Tester():
     }
 
     for test in testnormal:
-        print(f"Condition '{test}' took {timeit.timeit(lambda: FindMinSubstring(testnormal[test]), number=1000)} seconds to complete.")
+        print(f"Condition '{test}' took {timeit.timeit(lambda: FindMinSubstring(testnormal[test]), number=1000)} seconds to complete. Smallest substring is '{FindMinSubstring(testnormal[test])}'")
 
 Tester()
