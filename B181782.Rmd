@@ -1,0 +1,267 @@
+---
+title: "Semester 2 Assessed Coursework Report"
+author: "V. J. Vuorio"
+date: "April 13th, 2022"
+output:
+  bookdown::pdf_document2:
+    toc: true
+    toc_depth: 3
+    fig_caption: true
+    number_sections: true
+    global_numbering: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( #global plotting options for the markdown document
+  fig.align = "center",
+  fig.width = 6,
+  fig.height = 4,
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+  )
+## room for libraries
+library(tidyverse) #iddqd
+library(dplyr)
+library(kableExtra) #neat tables
+library(car) #???
+library(sjPlot) #plot_model and stuff
+library(performance) #I can't even remember
+library(emmeans) #pairwise comparison
+library(psych) #all fun stuff?
+library(moments) #testing for normality
+library(ggResidpanel)
+set.seed(666) #the number of the devil, in case any bootstrapping needs to be done
+
+dapr_raw <- read_csv("https://uoepsy.github.io/data/dapr2_2122_report2_data.csv", show_col_types = F, col_types = "fffnnnnn") #the raw file for safekeeping
+
+dapr <- dapr_raw %>%
+  mutate(educ = factor(educ,
+                       levels = c("nd", "ug", "pg"),
+                       labels = c("No degree", "Undergraduate", "Postgraduate")),
+         neuro = factor(neuro,
+                        levels = c("none", "desc", "pic"),
+                        labels = c("None", "Text", "Picture")),
+         degree = factor(ifelse(educ == "No degree", "No", "Yes")),
+         visual = factor(ifelse(neuro == "Picture", 1, 0)),
+         text = factor(ifelse(neuro == "Text", 1, 0))
+  ) %>%
+  select(PID, educ, neuro, degree, everything()
+  )
+
+comp <- list("Degree - No degree" = c(-1, 1/2, 1/2))
+```
+
+## 1. Analysis Strategy {-}
+
+Data for this report was gained from https://uoepsy.github.io/data/dapr2_2122_report2_data.csv. The data are simulated and contains information on 270 observations with regards to the participants's educational level (*educ* in the data) and type of neuroscientific information (*neuro*) presented to them. Participants judged the accuracy (*acc_rate*) of ten explanations on a scale from 0 (inaccurate) to 10 (accurate) for a total score of 0-100. The group conditions were recoded as factors, and as we are interested in comparing groups, we will use a dummy coding scheme, where those without a degree and with no neuroscientific information in their explanations will be used as a reference group. The data also contains (z-scored) personality scores by a Big Five measure: Openness (*O*), Conscientiousness (*C*), Extraversion (*E*), Agreeableness (*A*), and Neuroticism (*N*). We will account for differences in these traits in our analyses. There were no missing values in the data. For all analyses, effects will be considered statistically significant at $\alpha=0.01$.
+
+```{r anova, include = FALSE}
+mdlA <- lm(acc_rate ~ educ + neuro + O + C + E + A + N, data = dapr)
+mdlI <- lm(acc_rate ~ educ*neuro + O + C + E + A + N, data = dapr)
+
+anovI <- anova(mdlI) #anova for interaction model
+
+mdl_comp <- anova(mdlA, mdlI) #model comparison
+mdl_comp
+```
+
+We performed an F-test to compare two nested models to see which one is better fit: an additive three-factor ANOVA against a three-factor model with interaction. The test results (*F*(4, 256) = `r round(mdl_comp$F[2], 3)` *p* < .01) provides evidence against the additive model and suggest we use the following interaction model:
+\[
+\begin{aligned}
+\text{Accuracy (0-100)} = \beta_0+\beta_1Ed_{UG}+\beta_2Ed_{PG}+\beta_3Neuro_{T}+\beta_4Neuro_{P}+\beta_5O+\beta_6C+\beta_7E+\beta_8A+\beta_9N+ & \\ 
+\beta_{10}(Ed_{UG}\times Neuro_{T})+\beta_{11}(Ed_{UG} \times Neuro_{P})+\beta_{12}(Ed_{PG} \times Neuro_{T})+\beta_{13}(Ed_{PG} \times Neuro_{P}) + \epsilon
+\end{aligned}
+\]
+\[
+\begin{aligned}
+\text{where}
+\quad Ed_{UG} \text { = } & \text{Undergraduate degree} \\
+Ed_{PG} \text { = } & \text{Postgraduate degree} \\
+Neuro_{T} \text { = } & \text{Neuroscience condition: text} \\
+Neuro_{P} \text { = } & \text{Neuroscience condition: picture} \\
+O \text { = } & \text{Openness (Z-scored)} \\
+C \text { = } & \text{Conscientiousness (Z-scored) } \\
+E \text { = } & \text{Extraversion (Z-scored)} \\
+A \text { = } & \text{Agreeableness (Z-scored)} \\
+N \text { = } & \text{Neuroticism (Z-scored)}
+\end{aligned}
+\]
+
+One participant (observation 266) was found to have high influence values ($\epsilon^s_i > \pm2\text{SD}$, $>2\overline{h}$, $D_i > 0.016$). We determine this to be due to them having the lowest Openness score in the experiment (4.470 $\sigma$ below the mean; over 1.5 $\sigma$ smaller than the second lowest score). However, while an extreme value, it is a plausible score, and as winsorising the score did not affect model quality, we left it as it is.
+
+To assess the viability of our model, we will check the model assumptions: linearity and equal variance (via plot of residuals vs fitted values, expecting a horizontal line), independence (with the previous plot and a plot of residuals vs index, expecting a horizontal line on the former and a randomised spread on the latter), and normality of errors (via a qqplot and histogram, expecting a diagonal line and normal distribution).
+
+### 1.1. Research questions {-}
+
+We wish to find out if the differences in accuracy rates in each *neuro*-condition are due to participants's educational level. We will address this by testing whether the education coefficients equal zero
+
+\[
+\begin{aligned}
+H_0: \beta_1 = \beta_2 = 0 \\
+H_1: \beta_1 \neq \beta_2 \neq 0
+\end{aligned}
+\]
+
+Furthermore, we will assess the effect of education on specific levels of neuroscience condition by looking at the interaction terms; if significant, a pairwise comparison will be conducted to investigate the differences in accuracy rates between educational levels in each *neuro* condition.
+
+```{r, include = FALSE}
+mdlA <- lm(acc_rate ~ educ + neuro + O + C + E + A + N, data = dapr)
+mdlI <- lm(acc_rate ~ educ*neuro + O + C + E + A + N, data = dapr)
+emm_neuro <- emmeans(mdlI, ~ educ | neuro)
+emm_educ <- emmeans(mdlI, ~ neuro | educ)
+contr_neuro <- contrast(emm_neuro, method = "pairwise", adjust = "bonferroni")
+contr_educ <- contrast(emm_educ, method = "pairwise", adjust = "bonferroni")
+
+contr_neuro
+contr_educ
+
+confint(contr_neuro, level = .99)
+
+mdlI_coefs <- summary(mdlI)$coefficients
+```
+
+Our second research question makes us probe if the differences in accuracy rates between having text-based vs visual neuroscience facts present differs between those with a degree (of any level) and those without one. To answer this, we will perform a between-group contrast analysis, after which we will consider simple main effects to identify at which levels, if any, differences exist. Formally, our null and alternative hypotheses are
+
+\[
+\begin{aligned}
+H_0: \frac{\mu_{2,1} + \mu_{2,2}}{2} - \mu_{2,3} = \frac{\mu_{3,1} + \mu_{3,2}}{2} - \mu_{3,3} \\
+H_1: \frac{\mu_{2,1} + \mu_{2,2}}{2} - \mu_{2,3} \neq \frac{\mu_{3,1} + \mu_{3,2}}{2} - \mu_{3,3}
+\end{aligned}
+\]
+
+Where applicable, we will use Bonferroni correction for *p*-values for multiple comparisons in our analyses.
+
+## 2. Results {-}
+
+We compiled a table of descriptive statistics of all the key variables (see Table \@ref(tab:summarytable)), which indicate a downward trend in how accurate participants judged explanations based on their education, with more educated showing more skepticism. Moreover, accuracy seems to be influenced by the presence of neuroscientific information.
+
+```{r summarytable, fig.cap = "Summary of the distinctive values, grouped by education level and neuroscience group condition."}
+dapr %>%
+  group_by(educ, neuro) %>%
+  summarise(n = n(),
+            acc = mean(acc_rate),
+            acc_sd = sd(acc_rate),
+            Minimum = min(acc_rate),
+            Q1 = quantile(acc_rate, p = 0.25),
+            Median = median(acc_rate),
+            Q3 = quantile(acc_rate, p = 0.75),
+            Maximum = max(acc_rate),
+            .groups = "keep"
+            ) %>%
+kbl(digits = 2,
+    escape = FALSE,
+    align = "c",
+    caption = "Summary of the distinctive values, grouped by education level and neuroscience group condition.",
+    col.names = c("Education", "Group", "n", "Accuracy ($\\mu$)", "Accuracy ($\\sigma $)", "Minimum", "Q1", "Median", "Q3", "Maximum"),
+    booktabs = T,
+    linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+We checked assumptions for our interaction model for linearity (top left panel of Figure \@ref(fig:diagplots), found in Appendix), independence (top left panel and bottom left panel of Figure \@ref(fig:diagplots)), normality (top right panel and bottom right panel of Figure \@ref(fig:diagplots)), and equal variance (top left panel of Figure \@ref(fig:diagplots)). All plots followed our expectations well and as such our assumptions were met.
+
+We performed an analysis of variance (see Table \@ref(tab:anovatable) for all descriptive values) against the null hypothesis of equal accuracy rates across different educational levels while controlling for personality traits. Scores differed significantly by educational level (*F*(2, 256) = `r round(anovI[1,4], 3)`, *p* < 0.01). Furthermore, there was a significant interaction between education and neuroscience condition (*F*(4, 256) = `r round(anovI[8,4], 3)`, *p* < 0.01). We therefore reject our null hypothesis of no difference in accuracy rates between different neuroscience conditions across educational levels.
+
+```{r anovatable}
+as.data.frame(anovI) %>%
+  mutate(sign = ifelse(.[,5] < 0.01, "*", " "),
+         "Pr(>F)" = ifelse(is.na(as.numeric(as.character(anovI$`Pr(>F)`))), "NA", paste(sprintf("%.4f", .[,5]), ifelse(.[,5] < 0.01, " *", "")))) %>%
+  select(everything(), -sign) %>%
+  kbl(digits = c(3),
+      escape = TRUE,
+      table.attr = "style='width:75%;'",
+      caption = "Analysis of Variance table for the interaction model.",
+      align = "ccccl",
+      booktabs = T,
+      linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+Moreover, accuracy rates differed significantly between the reference group and undergraduate ($\beta_1$ = `r round(coef(summary(mdlI))[2,1], 3)`, SE = `r round(coef(summary(mdlI))[2,2], 3)`, *p* < 0.01) as well as postgraduate ($\beta_2$ = `r round(coef(summary(mdlI))[3,1], 3)`, SE = `r round(coef(summary(mdlI))[3,2], 3)`, *p* < 0.01) students, indicating that the baseline rate alone was different between those with and without an education, as can be seen in Figure \@ref(fig:plot); the left-hand figure shows a steady downward slope for accuracy rates with the increase in education, and the right-hand figure shows that the presence of more 'impressive' neuroscientific information has, in general, a greater amplifying effect on the accuracy rates, with the exception of postgraduate students, who remained unaffected by all *neuro*-conditions, visualised by the low variability in group means in the left-hand plot.
+
+```{r plot, out.width = "49.6%", fig.show = "hold", fig.cap = "Predicted values of accuracy rates per neuroscience condition and educational level."}
+par(mar = c(2, 2, .1, .1))
+emmip(mdlI, neuro ~ educ, CIs = TRUE) +
+  labs(x = "\n Level of education", y = "Accuracy (0-100) \n") +
+  theme_minimal()
+emmip(mdlI, educ ~ neuro, CIs = TRUE) +
+  labs(x = "\n Level of neuroscientific explanation", y = "Accuracy (0-100) \n") +
+  theme_minimal()
+```
+We performed a pairwise comparison of accuracy rates and differences between educational levels in neuro-condition, using Bonferroni correction for *p*-values. We found significant difference between all comparison groups except in the case of Undergraduate - Postgraduate comparison in the "None" neuro-condition. We compliled these results in Table \@ref(tab:neurotable) (next page), which includes 99% Confidence Interval for all comparisons. 
+
+```{r tests, include = FALSE}
+par(mfrow=c(1,2))
+contr_neuro
+contr_educ
+
+bonf.coefs <- confint(contrast(emm_neuro, method = "pairwise", adjust = "bonferroni"), level = 0.99)
+bonf.coefs
+```
+
+
+```{r neurotable}
+as.data.frame(contr_neuro) %>%
+  mutate(sign = ifelse(.[,7] < 0.01, "*", " "),
+         "p.value" = paste(sprintf("%.4f", .[,7]), ifelse(.[,7] < 0.01, " *", "")),
+         "0.5% CI" = bonf.coefs[,6],
+         "99.5% CI" = bonf.coefs[,7]
+     ) %>%
+     select(contrast, neuro, Estimate = estimate, SE, "0.5% CI", "99.5% CI","t.ratio", "p.value") %>%
+  kbl(digits = c(3, 3, 3, 3, 3, 3, 4),
+      escape = TRUE,
+      table.attr = "style='width:75%;'",
+      caption = "Pairwise comparison table for the differences between educational levels in each neuro condition.",
+      align = "rccccccl",
+      booktabs = T,
+      linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+
+```
+
+```{r contrasts, include = FALSE}
+#in this section, we will look at some planned contrasts to determine whether the difference in accuracy ratings between having visual vs text-based neuroscience information present differs between those with a degree (of any level) and those without a degree.
+
+emm <- emmeans(mdlI, ~neuro*educ)
+emm
+
+neuro_coef <- c("None" = 0, "Text" = 1, "Visual" = -1)
+educ_coef <- c("Postgraduate" = 0.5, "Undergraduate" = 0.5, "No degree" = -1)
+contr_coef <- outer(neuro_coef, educ_coef)
+contr_coef
+
+plot_model(mdlI, type = "pred", terms = c("neuro", "educ")) #visual candy for meself
+comp_res <- summary(contrast(emm, method = list("Research Hyp" = c(0, -1, 1, 0, 0.5, -0.5, 0, 0.5, -0.5))), infer = TRUE, level = 0.99)
+
+comp_conf <- summary(contr_educ, infer = TRUE, level = 0.99)
+
+pairs(emm, simple = "neuro", adjust = "bonferroni")
+```
+
+For the second research question, we performed a contrast analysis to test the difference in accuracy ratings between text-based vs visual neuroscience information between those with a degree (of any level) and those without a degree. The contrast analysis (*t*-ratio = `r round(comp_res[1,7], 3)`, *p*-value < 0.01, CI = [`r round(comp_res[1,5], 2)`, `r round(comp_res[1,6], 2)`]) gives support for differences in accuracy rates between those with and without a degree in depending whether text or visual neuroscientific facts were present in the explanation. Thus, we will reject the null hypothesis that the difference in differences is zero.
+
+Concerning simple effects in Text - Picture comparison, there is a significant difference in accuracy rates for those without a degree (*t*-ratio = `r round(comp_conf[3,8], 3)`, *p*-value < 0.01, CI = [`r round(comp_conf[3,6], 2)`, `r round(comp_conf[3,7], 2)`]), but no effect on accuracy rates for those with an undergraduate (*t*-ratio = `r round(comp_conf[6,8], 3)`, *p*-value = 1, CI = [`r round(comp_conf[6,6], 2)`, `r round(comp_conf[6,7], 2)`]) or postgraduate degree (*t*-ratio = `r round(comp_conf[9,8], 3)`, *p*-value = 1, CI = [`r round(comp_conf[9,6], 2)`, `r round(comp_conf[9,7], 2)`]). This is visualised in the right-hand plot in Figure \@ref(fig:plot) (previous page), with slopes for undergraduates and postgraduates remaining relatively horizontal when moving from Text to Picture condition, with an upward slope for those without a degree in the same comparison.
+
+Of the personality traits, we found Openness ($\beta_5$ = `r round(coef(summary(mdlI))[6,1], 3)`, SE = `r round(coef(summary(mdlI))[6,2], 3)`, *p* < 0.01) to have an amplifying impact on accuracy rates, being the only Big Five measure to have a significant effect, with one standard deviation increase in Openness score leading to a roughly 2-point increase in participants's total accuracy scores.
+
+## 3. Discussion {-}
+
+We conducted our analyses while keeping personality traits constant, of which we found Openness to be the only one having a significant effect on accuracy scores. We found evidence supporting the rejection of null hypotheses in both our research questions, with educational levels having an impact on how accurate participants rated given explanations of psychological phenomenon; the general trend was that more highly educated participants rated given explanations with more skepticism, with only comparison where no between-group difference was found was in Undergraduate - Postgraduate comparison with 'None' neuroscience -condition. Overall, postgraduate students's accuracy rates were unaffected by the different *neuro*-conditions. Regarding the differences in differences within Text - Picture comparison, we found evidence of these being different for those with no degree and for those with a degree (of any sort), with a significant effect on the former and no effect on the latter.
+
+### 3.1. Future research {-}
+
+It would be of interest to see what these effect would persist on those with other types of science or non-science degrees: is it expertise in a given field, science literacy in general, or education altogether which leads to this increased skepticism in participants? That seems like a question worth answering.
+
+\newpage
+## Appendix {-}
+
+```{r diagplots, out.width="100%", fig.cap = "Diagnostics plots for our interaction model."}
+resid_panel(mdlI)
+```
