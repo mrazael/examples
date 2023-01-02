@@ -1,8 +1,7 @@
 import timeit
+from itertools import product, combinations, chain
 
 def FindMinSubstring(strArr):
-
-    from itertools import product, combinations, chain
 
     fullstring, substring = strArr
 
