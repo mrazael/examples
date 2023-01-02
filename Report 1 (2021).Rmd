@@ -1,0 +1,410 @@
+---
+title: "Example Report"
+author: "V. J. Vuorio"
+date: "11/24/2021"
+output:
+  bookdown::pdf_document2:
+    toc: true
+    toc_depth: 3
+    fig_caption: true
+    number_sections: true
+    global_numbering: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set( #global plotting options for the markdown document
+  fig.align = "center",
+  fig.width = 6,
+  fig.height = 4,
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+  )
+## room for libraries
+library(tidyverse) #iddqd
+library(kableExtra) #neat tables
+library(car) #???
+library(sjPlot) #plot_model and stuff
+library(performance) #I can't even remember
+library(psych) #all fun stuff?
+library(moments) #testing for normality
+set.seed(666) #the number of the devil, in case any bootstrapping needs to be done
+
+dapr_raw <- read_csv("https://uoepsy.github.io/data/dapr2_2122_report1.csv", show_col_types = F) #the raw file for safekeeping
+dapr <- dapr_raw
+
+dapr <- dapr %>%
+  filter(sp_rate < 22, sp_rate > 0) %>%
+  mutate(endorse = factor(endorse,
+                          levels = c("counter", "pro"),
+                          labels = c("Counter", "Pro")
+                          ),
+         expert = factor(expert,
+                         levels = c(0, 1),
+                         labels = c("No", "Yes")
+                         ),
+         pers_z = scale(persuasive, center = TRUE, scale = TRUE)[, 1],
+         sp_c = scale(sp_rate, center = TRUE, scale = FALSE)[, 1]
+         
+         )
+
+summary(complete.cases(dapr)) #tells me there are no NA's in the dataset
+
+dapr_chi <- dapr %>%
+  group_by(endorse) %>%
+  summarise(isExpert = sum(expert == "Yes"), noExpert = sum(expert == "No")) #making the data ready for chi-square test
+
+chi_result <- chisq.test(dapr_chi[,-1], correct = FALSE) #chi-square test of independence
+chi_result
+
+dapr_cramer = sqrt(chi_result$statistic/nrow(dapr)/1) #calculating Cramér's V by hand
+
+skewness(dapr$persuasive) #skewness test confirms this
+kurtosis(dapr$persuasive) #kurtosis smaller than 3
+shapiro.test(dapr$persuasive) #p = 0.2353, we accept that the data for persuasiveness scores are normal enough
+```
+
+```{r m1_1, include = FALSE}
+m1 <- lm(pers_z ~ sp_c + endorse + sp_c:endorse, data = dapr) #first linear model
+
+dapr %>%
+  mutate(row = row_number(),
+         resid = rstudent(m1),
+         hat = hatvalues(m1),
+         cook = ((resid)^2/(3+1))*(hat/(1-hat)) #cooks.distance function exists, but this is just practice by hand
+         ) %>%
+  filter(2 > abs(resid), hat > 2*(3+1)/max(row), cook > 4/(nrow(dapr)-3-1)) %>% #filtering possibly influential cases
+  select(row, everything()) %>%
+    kbl(digits = 2,
+        table.attr = "style='width:75%;'",
+        align = "c",
+        booktabs = T,
+        linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 14)
+
+dapr %>%
+  ggplot(., aes(x = sp_c, y = pers_z)) +
+  geom_point() +
+  geom_smooth(method = loess,
+              formula = y ~ x,
+              colour = "red") +
+  geom_smooth(method = lm,
+              formula = y ~ x,
+              colour = "blue")
+
+vif(m1)
+```
+
+```{r m2, include = FALSE}
+m2 <- lm(pers_z ~ sp_c + endorse + sp_c:endorse + age + expert, data = dapr)
+
+dapr %>%
+  mutate(row = row_number(),
+         resid = rstudent(m2),
+         hat = hatvalues(m2),
+         cook = ((resid)^2/(5+1))*(hat/(1-hat))
+         ) %>%
+  filter(2 > abs(resid), hat > 2*(5+1)/max(row), cook > 4/(nrow(dapr)-5-1)) %>% #filtering possibly influential cases
+  select(row, everything()) %>%
+    kbl(digits = 2,
+        table.attr = "style='width:75%;'",
+        align = "c",
+        booktabs = T,
+        linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 14)
+
+vif(m2)
+```
+
+\newpage 
+
+## 1. Analysis Strategy {-}
+
+### 1.1. The Data {-}
+Data for this report was gained from https://uoepsy.github.io/data/dapr2_2122_report1.csv: the data contains information on 150 observations with regards to whether or not the participants endorsed a specific political view presented to them prior to the study, and with regards to the age (in years) of the speaker they listened to, how fast they spoke (5-22 phones per second) and whether they were presented as an expert or as a member of the general public, as well as how persuasive (1-100) the participants rated the speaker at the end of the study. We reorganised the data so that the 'endorse' variable was recorded as factor (instead of a character vector). To make their effect easier to interpret, we standardised persuasiveness scores; due to the presence of interaction terms, we mean-centered 'sp_rate' for the first model. As the independent variables were otherwise meaningful and easily readable, we left them intact.
+
+There were no missing values in the participant data. However, with regards to one participant (observation 118), the speech rate was outside given ranges. As we cannot determine whether this value (22.11) is a typo or an error in an experimental procedure, we chose to discard it. This left us with an array of 149 observations. A $\chi^2$ test of independence will be conducted to examine whether speakers were consistently presented as experts or non-experts across endorsement groups, and Cramér's V will be calculated to assess the correlation between these groups.
+
+### 1.2. First Research Question {-}
+
+For all analyses, effects will be considered statistically significant at $\alpha=0.01$.
+
+Our first research question concerns how the perceived persuasiveness of a speaker is influence by the rate at which they speak, and whether this is dependent on listeners having counter- or pro-attitudinal opinions towards the statement being presented. To address this, we use the following multiple regression model:
+
+$$M1: \text{Persuasiveness (z-scored)} = \beta_0+\beta_1SR+\beta_2En+\beta_3(SR \times En)+\epsilon$$
+\[
+\begin{aligned}
+\text{where} \quad \text{SR = } & \text{Speech Rate (mean-centered)} \\
+\text{En = } & \text{Endorsement}
+\end{aligned}
+\]
+
+The dependent value (persuasiveness) showed slight negative skew (see Figure \@ref(fig:normality)), which led us to perform a Shapiro-Wilks test of normality (*W* = 0.988, *p* = 0.235), and as the p-value was greater than $\alpha = .01$, we failed to reject the null hypothesis of normal distribution. Moreover, four observations (9, 39, 59, and 127 of the remaining 149) were found to have high influence values ($\epsilon^s_i > \pm2\text{SD}$, $>2\overline{h}$, $D_i > 0.027$). However, after investigating their underlying cause, which turned out to be disproportionately sized persuasiveness scores in relation to age or speech rate, and seeing their removal having minimal impact on our model due to the observations being spread between categorical variables (hence pretty much canceling each other out), and winsorising the scores not having an effect, we decided to let them be.
+
+To assess the viability of our linear model, we will visually check the common LINE-assumptions: linearity (via plot of residuals vs fitted values, expecting a horizontal line), independence (with the previous plot and a plot of residuals vs index, expecting a horizontal line on the former and randomised spread on the latter), normality (via a qqplot of the residuals, expecting a diagonal line) equal variances (via a scale-location plot, expecting a horizontal line). We will also investigate if there exists any multicollinearity by checking the VIF values, where values > 5 will be considered to indicate moderate multicollinearity, and values > 10 severe.
+
+To address the question whether the influence speech rates have on speaker's perceived persuasiveness are moderated by participant's endorsement of the given view, we test whether the difference in slopes across endorsement categories equals zero, formally put:
+
+\[
+\begin{aligned}
+H_0: \beta_1 = \beta_3 \\
+H_1: \beta_1 \neq \beta_3
+\end{aligned}
+\]
+
+\newpage
+
+### 1.3. Second Research Question {-}
+
+Our second research question tried to assess whether the age of the speaker and if they were presented as an expert or as a member of the general public accounted for any identified effects of rate of speech and counter- or pro-attitudinal opinions. We add predictors 'age' and 'expert' to our multiple regression model:
+
+
+$$M2: \text{Persuasiveness (z-scored)} = \beta_0+\beta_1SR+\beta_2En+\beta_3A+\beta_4Ex+\beta_5(SR \times En)+\epsilon$$
+
+\[
+\begin{aligned}
+\text{where} \quad \text{SR = } & \text{Speech Rate (mean-centered)} \\
+\text{A = } & \text{Age} \\
+\text{En = } & \text{Endorsement} \\
+\text{Ex = } & \text{Expert}
+\end{aligned}
+\]
+
+
+Three observations, which were also observed on the previous model (39, 59, 127), were found to have high influence values ($\epsilon^s_i > \pm2\text{SD}$, $>2\overline{h}$, $D_i > 0.027$). However, the model did not seem to suffer from their presence, and as such we decided not to remove it. Same assumption checks will be conducted as described above for the first model, and VIF values will be observed for possible collinearity.
+
+Descriptive measures will be used to assess the effects of age and expertise on speech rate and endorsement, with comparison being done between beta coefficients of the first model (M1) and second model (M2). We will specifically look at differences in intercepts between endorsement categories as well as slopes $\beta_1$ and $\beta_3$ (M1) and $\beta_1$ and $\beta_6$ (M2) for speech rates between models.
+
+## 2. Results {-}
+
+### 2.1. Overview {-}
+We began our observation by compiling descriptive statistics of the data (see Table \@ref(tab:summarytable)) of all the key variables, which gave us a clue concerning the direction of effects that the different variables would have. At first sight, there was a noticeable difference between persuasiveness values depending on the participants' endorsement of the given political view, with those endorsing the view rating the speakers as more persuasive. Group sizes were equal between levels of endorsement.
+
+
+
+However, there was some deviation in the spread of presented expertise between endorsement groups. A $\chi^2$ test of independence was performed to examine whether expert level was consistent across endorsement groups (*n* = `r sum(chi_result$observed)`). The relation between participants' endorsement and whether speakers were presented to them as experts was not significant ($\chi^2$(`r chi_result$parameter`) = `r round(chi_result$statistic, 3)`, *p* = `r round(chi_result$p.value, 3)`). Therefore, we fail to reject the null hypothesis that speakers' presented level of expertise was independent of participants' level of endorsement.
+
+```{r summarytable, out.width="50%", fig.cap= "Summary of the distinctive values, grouped by endorsement and level of expertise."}
+dapr %>%
+  group_by(endorse, expert) %>%
+  summarise(n = n(),
+            mean_Age = mean(age),
+            sd_Age = sd(age),
+            mean_Sp = mean(sp_rate),
+            sd_Sp = sd(sp_rate),
+            Pers = mean(persuasive),
+            sd_Pers = sd(persuasive)
+  ) %>%
+kbl(digits = 2,
+    escape = FALSE,
+    align = "c",
+    caption = "Summary of the distinctive values, grouped by endorsement and level of expertise.",
+    col.names = c("Endorse [note]", "Expert [note]", "n", "Age", "$\\sigma_{Age}$", "SR", "$\\sigma_{SR}$", "Persuasive", "$\\sigma_{Pers}$"),
+    booktabs = T,
+    linesep = "") %>%
+  footnote(general = "Values are means for each given group.",
+           general_title = "Note:",
+           footnote_as_chunk = T, title_format = "italic") %>%
+  add_footnote(c("Participants's endorsement of a given political view",
+                 "Whether the speaker was presented as an expert"),
+               notation = "alphabet") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+A Pearsons correlation matrix (Figure \@ref(fig:cor2)) was created. Age is positively (although weakly) correlated with speech rate and overall persuasiveness. Effect size for 'endorse' and 'expert' were calculated using Cramér's V (*V*(1) = `r paste0(round(dapr_cramer, 3), "0")`), which leads us to conclude that participants' level of endorsement is not correlated with speakers' presented level of expertise.
+
+```{r cor2, out.width="50%", fig.cap = "Pearson correlation coefficients of all variables."}
+dapr %>%
+    select(pers_z, sp_c, age) %>%
+    cor.plot(.,
+            labels = c("Pers", "SR", "Age"),
+            cex = 1,
+            keep.par = F,
+            show.legend = F,
+            stars = T,
+            alpha = 0.50,
+            diag = F,
+            xaxis = 3,
+            MAR = 1.66,
+            main = " ",
+            cex.axis = .8)
+```
+### 2.2. First Multiple Regression Model (M1) {-}
+
+We checked assumptions for our first linear model (M1) for linearity (top left panel of Figure \@ref(fig:diagplots)), independence (top left panel and bottom middle panel of Figure \@ref(fig:diagplots)), normality (top middle panel of Figure \@ref(fig:diagplots)), and equal variance (top right panel of Figure \@ref(fig:diagplots)). All plots followed our expectations reasonably well, with QQ-plots showing only slight deviation at the far ends, which we do not judge to be problematic. All VIF values for the variables were less than five, which gives us evidence against multicollinearity in the model.
+
+```{r anova, include = FALSE}
+null.m1 <- lm(pers_z ~ sp_c + endorse, data = dapr)
+m1.anova <- anova(null.m1, m1)
+m1.anova
+
+null.m2 <- lm(pers_z ~ sp_c + endorse + sp_c:endorse + age, data = dapr)
+m2.anova <- anova(m1, null.m2, m2)
+m2.anova
+
+m1.null_coef <- summary(null.m1)$coefficients
+m1.null_values <- summary(null.m1)
+
+m1_coef <- summary(m1)$coefficients
+m1_values <- summary(m1)
+
+m2.null_coef <- summary(null.m2)$coefficients
+m2.null_values <- summary(null.m2)
+
+m2_coef <- summary(m2)$coefficients
+m2_values <- summary(m2)
+
+m1_pers_coef <- coef(lm(persuasive ~ sp_c + endorse + sp_c:endorse, data = dapr))
+m1_pers_coef
+```
+
+Full regression results including 99\% Confidence Intervals are shown in Table \@ref(tab:m1table). Participants who did not endorse a given political view ($\beta_1$ = `r round(m1_coef[2,1], 3)`, SE = `r round(m1_coef[2,2], 3)`, *p* = `r round(m1_coef[2,4], 3)`) rated speakers more favourably when their rate of speech increased, with a one phone per second increase leading to a `r abs(round(m1_coef[2], 3))` standardised point increase in persuasiveness scores. The opposite trend was found for those who endorsed a given political view ($\beta_3$ = `r round(m1_coef[4,1], 3)`, SE = `r round(m1_coef[4,2], 3)`, *p* = `r round(m1_coef[4,4], 3)`), where speakers were rated `r abs(round(m1_coef[2]+m1_coef[4], 3))` standardised points less persuasive for every phone per second they uttered during their presentation. This difference in the direction of the slopes between endorsement levels is displayed in Figure \@ref(fig:plot), which shows crossing non-parallel slopes between categories. The aforementioned statistics also highlight that while $\beta_1$ was not statistically significant at $\alpha = 0.01$, the interaction term $\beta_3$ was with p-value of 0.003, which supports the alternative hypothesis of speech rates being different as well as being dependent on endorsement levels.
+
+An ANOVA test was conducted between model M1 and its simplified version (see Table \@ref(tab:m1table2)), which has no interaction term (*F*(146, 145) = `r round(m1.anova$F[2], 3)`, *p* < .01), and its significance leads us to rejecting the null hypothesis of no difference between slopes. Thus we conclude that speech rates are influenced by endorsement categories.
+
+```{r m1table}
+m1table <- tibble("Predictors" = c("(Intercept)", "sp$\t\\_$c", "endorsePro", "sp$\t\\_$c:endorsePro"),
+                   "Estimate" = c(m1_coef[1,1], m1_coef[2,1], m1_coef[3,1], m1_coef[4,1]),
+                   "SE" = c(m1_coef[1,2], m1_coef[2,2], m1_coef[3,2], m1_coef[4,2]),
+                   "0.5$\\%$ CI" = c(m1_coef[1,1]-2.576*m1_coef[1,2],
+                                 m1_coef[2,1]-2.576*m1_coef[2,2],
+                                 m1_coef[3,1]-2.576*m1_coef[3,2],
+                                 m1_coef[4,1]-2.576*m1_coef[4,2]),
+                   "99.5$\\%$ CI" = c(m1_coef[1,1]+2.576*m1_coef[1,2],
+                                  m1_coef[2,1]+2.576*m1_coef[2,2],
+                                  m1_coef[3,1]+2.576*m1_coef[3,2],
+                                  m1_coef[4,1]+2.576*m1_coef[4,2]),
+                   "t-value" = c(m1_coef[1,3], m1_coef[2,3], m1_coef[3,3], m1_coef[4,3]),
+                   "p" = c(m1_coef[1,4], m1_coef[2,4], m1_coef[3,4], m1_coef[4,4])
+)
+
+m1table %>%
+  kbl(digits = 3,
+    escape = FALSE,
+    align = "rcccccc",
+    caption = "Regression table for Persuasiveness model. Outcome variable is standardised Persuasive score, and Speech Rate is mean-centered.",
+    booktabs = T,
+    linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+
+```{r plot, out.width="70%", fig.cap = "Visualising the difference in slopes between levels of endorsement in regression model M1."}
+plot_model(m1,
+           type = "pred",
+           terms = c("sp_c", "endorse"),
+           colors = c("pink3", "cadetblue3"),
+           axis.title = c("\n Speech Rate (mean-centered)", "Persuasiveness (z-scored) \n"),
+           title = " ",
+           legend.title = "Endorse") +
+  geom_abline(intercept = m1_coef[1,1],
+              slope = m1_coef[2,1],
+              linetype = 2,
+              colour = "pink3") +
+  geom_abline(intercept = m1_coef[1,1]+m1_coef[3,1],
+              slope = m1_coef[2,1]+m1_coef[4,1],
+              linetype = 2,
+              colour = "cadetblue3") +
+  theme_minimal() +
+  scale_x_continuous(limits = c(-8, 8), breaks = seq(-8, 8, length.out = 3))
+```
+
+### 2.3. Second Multiple Regression Model (M2) {-}
+
+We performed same assumptions checks for the second model (see Figure \@ref(fig:diagplots2)) as we did for the first. All plots followed our expectations reasonably well, with QQ-plots showing only slight deviation at the far ends, which we do not judge to be problematic. All VIF values for the variables were less than five, which gives us evidence against multicollinearity in the model.
+
+Full regression results including 99\% Confidence Intervals are shown in Table \@ref(tab:m2table), with statistical elements from all regression models shown in Table \@ref(tab:m1table2).
+
+```{r m2table}
+m2table <- tibble("Predictors" = c("(Intercept)", "sp$\t\\_$c", "endorsePro", "age", "expert", "sp$\t\\_$c:endorsePro"),
+                   "Estimate" = c(m2_coef[1,1], m2_coef[2,1], m2_coef[3,1], m2_coef[4,1], m2_coef[5,1], m2_coef[6,1]),
+                   "SE" = c(m2_coef[1,2], m2_coef[2,2], m2_coef[3,2], m2_coef[4,2], m2_coef[5,2], m2_coef[6,2]),
+                   "0.5$\\%$ CI" = c(m2_coef[1,1]-2.576*m2_coef[1,2],
+                                 m2_coef[2,1]-2.576*m2_coef[2,2],
+                                 m2_coef[3,1]-2.576*m2_coef[3,2],
+                                 m2_coef[4,1]-2.576*m2_coef[4,2],
+                                 m2_coef[4,1]-2.576*m2_coef[5,2],
+                                 m2_coef[4,1]-2.576*m2_coef[6,2]),
+                   "99.5$\\%$ CI" = c(m2_coef[1,1]+2.576*m2_coef[1,2],
+                                  m2_coef[2,1]+2.576*m2_coef[2,2],
+                                  m2_coef[3,1]+2.576*m2_coef[3,2],
+                                  m2_coef[4,1]+2.576*m2_coef[4,2],
+                                  m2_coef[4,1]+2.576*m2_coef[5,2],
+                                  m2_coef[4,1]+2.576*m2_coef[6,2]),
+                   "t-value" = c(m2_coef[1,3], m2_coef[2,3], m2_coef[3,3], m2_coef[4,3], m2_coef[5,3], m2_coef[6,3]),
+                   "p" = c(m2_coef[1,4], m2_coef[2,4], m2_coef[3,4], m2_coef[4,4], m2_coef[5,4], m2_coef[6,4])
+)
+
+m2table %>%
+  kbl(digits = 3,
+    escape = FALSE,
+    align = "rcccccc",
+    caption = "Second regression table for Persuasiveness model. Outcome variable is standardised Persuasive score, and Speech Rate is mean-centered.",
+    booktabs = T,
+    linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+From a descriptive standpoint, there are noticeable differences between regression models M1 and M2: first, whilst the difference in intercepts between endorsement categories in M1 is `r abs(round(m1_coef[1,1]-m1_coef[3,1], 3))`, in M2 it is `r abs(round(m2_coef[1,1]-m2_coef[3,1], 3))`. While this difference in intercepts has magnified, the effect of slopes has worsened, with the M2 interaction slope's ($\beta_6$ = `r round(m2_coef[6,1], 3)`, SE = `r round(m2_coef[6,2], 3)`, *p* = `r round(m2_coef[6,4], 3)`) confidence interval now containing 0, making it statistically not significant.
+
+Of the newly introduced independent variables, 'age' ($\beta_4$, `r round(m2_coef[4,1], 3)`, SE = `r round(m2_coef[4,2], 3)`, *p* = `r round(m2_coef[4,4], 3)`) is statistically significant, whilst 'expert' ($\beta_4$, `r round(m2_coef[5,1], 3)`, SE = `r round(m2_coef[5,2], 3)`, *p* = `r round(m2_coef[5,4], 3)`) seems to have a weak influence both on the model and other variables. This view gains support from our model comparison, where we conducted ANOVA between four regression models (see Figure \@ref(tab:m1table2), next page), where we introduced predictors one by one, seeing how this affected the models' F-statistic and Adjusted R$^2$.
+
+```{r m1table2}
+m1table2 <- tibble("Model" = c("null.M1", "M1", "null.M2", "M2"),
+                   "DV's added" = c("sp$\t\\_$c, endorse", "sp$\t\\_$c:endorsePro", "age", "expert"),
+                   "Observations" = c(149, 149, 149, 149),
+                   "F-statistic" = c(m1.null_values$fstatistic[1], m1_values$fstatistic[1], m2.null_values$fstatistic[1], m2_values$fstatistic[1]),
+                   "df$\t_1$" = c(3, 4, 5, 6),
+                   "df$\t_2$" = c(146, 145, 144, 143),
+                   "R$^2$" = c(m1.null_values$r.squared, m1_values$r.squared, m2.null_values$r.squared, m2_values$r.squared),
+                   "R$^2$ adjusted" = c(m1.null_values$adj.r.squared, m1_values$adj.r.squared, m2.null_values$adj.r.squared, m2_values$adj.r.squared)
+)
+
+m1table2 %>%
+  kbl(digits = 3,
+      escape = FALSE,
+      align = "rccccccc",
+      caption = "Statistics for multiple regression models for model comparison.",
+      booktabs = T,
+      linesep = "") %>%
+  kable_paper(c("hover", "responsive")) %>%
+  kable_styling(font_size = 10,
+                latex_options = "HOLD_position")
+```
+
+First, an ANOVA between M1 and its next iteration, where we added the predictor 'age', increased the power of the model (*F*(145, 144) = `r round(m2.anova$F[2], 3)`, *p* < .01), which makes us hypothesise that age could affect persuasiveness bi-directionally, first by affecting persuasiveness scores as they are, and second by affecting them through increase in speech rate. This assumption relies on the weak correlations provided in Figure \@ref(fig:cor2). The correlations are weak, but cumulative effects could make age a powerful factor in this model. Second, 'expert' variable seems to yield no influence on other variables. The following notions support this assumption: its weak p-value (0.931) as well as its confidence interval's width (0.81) speak of its low power, but more importantly, an ANOVA between the last iteration and M2 was conducted (*F*(144, 143) = `r round(m2.anova$F[3], 3)`, *p* = 0.931), which lowered both F-statistic (from 5.546 to 4.408) and Adjusted R$^2$ (from 0.109 to 0.103) of the model.
+
+## 3. Discussion {-}
+
+Regarding our first research question, we feel confident in our assessment that speech rates are influenced by whether the participant held pro- or counter-attitudinal opinions regarding the given political opinions; the evidence for this comes both from descriptive statistics and statistical analyses.
+
+We are confident that 'expert' does not moderate effects between speech rate or endorsement, but the effect of 'age' could not conclusively be determined. From this data, we extrapolate a possibility that age is negatively correlated with counter-attitudinal opinions due to the noticeable difference between mean raw persuasiveness scores (50.4 for 'Counter', 55.9 for 'Pro') and due to the great difference between intercepts for that group between models (`r round(m1_coef[1,1], 3)` to `r round(m2_coef[1,1], 3)`).
+
+\newpage
+## Appendix {-}
+
+```{r normality, out.width="100%", fig.cap = "Histogram for normality of persuasiveness scores."}
+hist(dapr$persuasive,
+     main = "Histogram of Persuasiveness scores\n",
+     xlab = "\nPersuasiveness (1-100)") #histogram shows slight negative skew
+```
+
+```{r diagplots, out.width="100%", fig.cap = "Diagnostics plots for M1."}
+par(mfrow = c(2,3))
+plot(m1)
+plot(resid(m1)) #an additional test for independence
+```
+
+```{r diagplots2, out.width="100%", fig.cap = "Diagnostics plots for M2."}
+par(mfrow=c(2,3))
+plot(m2)
+plot(resid(m2)) #an additional test for independence
+```
