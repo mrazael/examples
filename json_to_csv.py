@@ -161,7 +161,7 @@ class BigData:
 
                         n += 1
                         if k == n:
-                            print(f'Processed {8 ** k} lines.')
+                            print(f'Processed {k} lines.')
                             k += 1000000
 
         print("Wrote 'top16.csv', 'redditsyssample.csv, and 'mainsubs.csv' into files.")
