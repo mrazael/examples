@@ -14,3 +14,4 @@ synthesiser.py
 - Final assignment for a Linguistics course
 
 ![Screenshot](smoking.png)
+![Screenshot2](sl3 (1).png)
