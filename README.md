@@ -13,4 +13,4 @@ json_to_csv.py
 synthesiser.py
 - Final assignment for a Linguistics course
 
-![Screenshot](Rplot02-1.png)
+![Screenshot](smoking.png)
