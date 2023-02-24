@@ -13,5 +13,5 @@ json_to_csv.py
 synthesiser.py
 - Final assignment for a Linguistics course
 
-![Screenshot](smoking.png | width = "50")
+<img src="[https://github.com/mrazael/examples/blob/main/sl3.png" width="100" height="100">
 ![Screenshot2](sl3.png)
